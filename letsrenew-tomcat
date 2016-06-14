@@ -1,0 +1,123 @@
+#------------------------
+# Author: Florent Bervas, Telecoms Sans Frontieres
+# Mail: it@tsfi.org
+# GIT Repository: internal gitlab
+#------------------------
+
+# Global configuration
+EMAIL="it@tsfi.org"
+LISTENPORT="8888"
+HOMEDIR="/home/odk/"
+LETSENCRYPTDIR="/opt/letsencrypt/"
+KEYTOOLDIR="/usr/lib/jvm/jdk-7-oracle-x64/jre/bin/"
+KEYSTORE="${HOMEDIR}/.keystore"
+# Parameters dependent variable
+DOMAIN=""
+CERTDIR=""
+
+# Import password
+PASSWD=$(cat ${HOMEDIR}/.storepass)
+
+# Usage function
+function usage {
+    cat << EOF
+Usage: $(basename ${0}) [--renew] [--clean] [--import] [--help] [domain]
+
+This script is designed to handle automatic management of Letsencrypt
+certificates on production servers.
+
+  --renew   create or renew existing SSL/TLS certificate
+  --clean   clean archived certificates
+  --import  import existing certificate into keystore
+  --help    print this help
+
+OPTIONS:
+  domain    public domain name
+
+EOF
+}
+
+function init() {
+    CERTDIR="/etc/letsencrypt/live/${DOMAIN}/"
+}
+
+function letsrenew() {
+    ${LETSENCRYPTDIR}/letsencrypt-auto \
+        certonly \
+        --agree-tos \
+        --no-self-upgrade \
+        --non-interactive \
+        --renew-by-default \
+        --standalone \
+        --email ${EMAIL} \
+        --http-01-port ${LISTENPORT} \
+        -d ${DOMAIN}
+}
+
+function letsimport() {
+    # Delete previously imported certificates
+    ${KEYTOOLDIR}/keytool \
+        -delete \
+        -alias root \
+        -storepass ${PASSWD} \
+        -keystore ${KEYSTORE}
+    ${KEYTOOLDIR}/keytool \
+        -delete \
+        -alias tomcat \
+        -storepass ${PASSWD} \
+        -keystore ${KEYSTORE}
+
+    # Generate signed certificate
+    openssl pkcs12 \
+        -export \
+        -in ${CERTDIR}/fullchain.pem \
+        -inkey ${CERTDIR}/privkey.pem \
+        -out ${CERTDIR}/${DOMAIN}.p12 \
+        -name tomcat \
+        -CAfile ${CERTDIR}/chain.pem \
+        -caname root \
+        -password pass:${PASSWD}
+
+    # Import keystore into Tomcat
+    ${KEYTOOLDIR}/keytool \
+        -importkeystore \
+        -srcstorepass ${PASSWD} \
+        -deststorepass ${PASSWD} \
+        -destkeypass ${PASSWD} \
+        -srckeystore ${CERTDIR}/${DOMAIN}.p12 \
+        -srcstoretype PKCS12 \
+        -alias tomcat \
+        -keystore ${KEYSTORE}
+    ${KEYTOOLDIR}/keytool \
+        -import \
+        -trustcacerts \
+        -alias root \
+        -deststorepass ${PASSWD} \
+        -file ${CERTDIR}/chain.pem \
+        -noprompt \
+        -keystore ${KEYSTORE}
+}
+
+# Get parameters
+if [[ $# -lt 2 ]]
+then
+        usage
+else
+    # Extract domain
+    DOMAIN=${2}
+    # Initialize environment
+    init
+    # Execute action
+        case "${1}" in
+                '--renew')
+                        letsrenew ;;
+                '--clean')
+                        usage ;;
+        '--import')
+            letsimport ;;
+                *) 
+                        usage ;;
+        esac
+fi
+
+exit $?
