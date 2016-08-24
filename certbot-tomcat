@@ -1,66 +1,127 @@
+#!/bin/bash
 #------------------------
-# Author: Florent Bervas, Telecoms Sans Frontieres
+# MIT License
+#
+# Copyright (c) 2016 Télécoms Sans Frontières
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+#
+#------------------------
+# Author: Telecoms Sans Frontieres
 # Mail: it@tsfi.org
-# GIT Repository: internal gitlab
+# GIT Repository: https://github.com/TelecomsSansFrontieres
+#
+# Contributors:
+# - Florent Bervas
 #------------------------
 
-# Global configuration
-EMAIL="it@tsfi.org"
-LISTENPORT="8888"
-HOMEDIR="/home/odk/"
-LETSENCRYPTDIR="/opt/letsencrypt/"
-KEYTOOLDIR="/usr/lib/jvm/jdk-7-oracle-x64/jre/bin/"
-KEYSTORE="${HOMEDIR}/.keystore"
-# Parameters dependent variable
+# Global configuration variable declared in configuration file
+EMAIL=""
+LISTENPORT=""
+HOMEDIR=""
+LETSENCRYPTDIR=""
+KEYTOOLDIR=""
+KEYSTORE=""
+PASSFILE=""
 DOMAIN=""
 CERTDIR=""
+EXPIRE_DAYS=""
 
-# Import password
-PASSWD=$(cat ${HOMEDIR}/.storepass)
 
 # Usage function
 function usage {
 	cat << EOF
-Usage: $(basename ${0}) --[create|renew|import] [--help] [domain]
-
-This script is designed to handle automatic management of Letsencrypt
+Usage: $(basename ${0}) -f [FILE] [OPTION]...
+This script is designed to handle automated management of Letsencrypt
 certificates on production servers.
 
-  --create	create a new SSL/TLS certificate
-  --renew	renew existing SSL/TLS certificate
-  --clean	clean archived certificates
-  --import	import existing certificate into keystore
-  --help	print this help
+  -f,--file [FILE]  load configuration file
 
-OPTIONS:
-  domain	public domain name
+OPTIONS
+  -c,--create       create a new SSL/TLS certificate
+  -r,--renew        renew-only existing SSL/TLS certificate (exit 2 on success)
+  -i,--import       import existing certificate into keystore
+  -h,--help         print this help
 
 EOF
+
+    return 1
 }
 
 function init() {
-	CERTDIR="/etc/letsencrypt/live/${DOMAIN}/"
+    # Exit flag
+    e=false    
+
+    # Check domain
+    [ -z "${DOMAIN}" ] && echo "DOMAIN variable is not defined" && e=true
+	[ -z "${CERTDIR}" ] && CERTDIR="/etc/letsencrypt/live/${DOMAIN}/"
+	[ -z "${EXPIRE_DAYS}" ] && EXPIRE_DAYS="30"
+    # Test variables, files and directories
+    [ -z "$EMAIL" ] && echo "EMAIL variable is not defined" && e=true
+    [ ! -d "$HOMEDIR" ] && echo "HOMEDIR doesn't exist" && e=true
+    [ ! -d "$LETSENCRYPTDIR" ] && echo "LETSENCRYPTDIR doesn't exist" && e=true
+    [ ! -d "$KEYTOOLDIR" ] && echo "KEYTOOLDIR doesn't exist" && e=true
+    [ ! -f "$KEYSTORE" ] && echo "KEYSTORE doesn't exist" && e=true
+    [ ! -f "$PASSFILE" ] && echo "PASSFILE doesn't exist" && e=true
+    # not mandatory: [ -z "$LISTENPORT" ] && echo "LISTENPORT variable is not defined" && exit 1
+
+    # Exit if flag is true
+    [ $e == true ] && exit 1
+
+    # Import password
+    mapfile < ${PASSFILE} PASSWD
 }
 
+# Renew process automatically trigger importing function on success.
+# The returned code is different between "Cert not yet due for renewal" (0)
+# and "Successful renewal" (2).
 function renew() {
-	${LETSENCRYPTDIR}/letsencrypt-auto \
-		renew
+    # Save initial cert hash
+    certhash=$(md5sum "${CERTDIR}/cert.pem" | cut -d' ' -f1)
+
+	${LETSENCRYPTDIR}/certbot-auto \
+		renew --post-hook "${0} -f ${CONFIG} -i"
+
+    # Check if md5sum differ from initial cert hash
+    if [ ${certhash} != $(md5sum "${CERTDIR}/cert.pem" | cut -d' ' -f1) ]; then
+        return 2
+    fi
+
+    return $?
 }
 
 function create() {
-	${LETSENCRYPTDIR}/letsencrypt-auto \
+	${LETSENCRYPTDIR}/certbot-auto \
 		certonly \
 		--agree-tos \
 		--no-self-upgrade \
 		--non-interactive \
 		--renew-by-default \
+        --renew_before_expiry ${EXPIRE_DAYS} \
 		--standalone \
 		--email ${EMAIL} \
 		--http-01-port ${LISTENPORT} \
 		-d ${DOMAIN}
 }
 
-function import() {
+function clean() {
 	# Delete previously imported certificates
 	${KEYTOOLDIR}/keytool \
 		-delete \
@@ -72,6 +133,11 @@ function import() {
 		-alias tomcat \
 		-storepass ${PASSWD} \
 		-keystore ${KEYSTORE}
+}
+
+function import() {
+    # Clean previous stored certificates
+    clean
 
 	# Generate signed certificate
 	openssl pkcs12 \
@@ -102,30 +168,68 @@ function import() {
 		-file ${CERTDIR}/chain.pem \
 		-noprompt \
 		-keystore ${KEYSTORE}
+
+    return $?
 }
 
 # Get parameters
-if [[ $# -lt 2 ]]
+OPTS=$(getopt -o f:crih --long file:,create,renew,import,help -n 'parse-options' -- "$@")
+
+# Check options handler return code
+if [ $? != 0 ]
 then
-        usage
+    echo "Failed parsing options." >&2
+    usage
+    exit 1
+fi
+
+eval set -- "$OPTS"
+
+# Process parameters
+while true
+do
+    case "$1" in
+        -f | --file )
+            CONFIG=${2}; shift; shift ;;
+        -c | --create )
+            if [ -n "${ACTION}" ]; then usage; exit 1; fi
+            ACTION=create; shift ;;
+        -r | --renew )
+            if [ -n "${ACTION}" ]; then usage; exit 1; fi
+            ACTION=renew; shift ;;
+        -i | --import )
+            if [ -n "${ACTION}" ]; then usage; exit 1; fi
+            ACTION=import; shift ;;
+        -h | --help )
+            usage; exit 0 ;;
+        -- )
+            shift; break ;;
+        * )
+            break ;;
+    esac
+done
+
+# Start the process
+if [ -f "${CONFIG}" ] && [ -n "${ACTION}" ]
+then
+    # Import configuration file
+    . ${CONFIG}
+    # Initialize environment
+    init
+    # Execute action
+    case "${ACTION}" in
+        'create')
+            create ;;
+        'renew')
+            renew ;;
+        'import')
+            import ;;
+        *)
+            usage ;;
+    esac
 else
-	# Extract domain
-	DOMAIN=${2}
-	# Initialize environment
-	init
-	# Execute action
-        case "${1}" in
-                '--create')
-                        create ;;
-                '--renew')
-                        renew ;;
-                '--clean')
-                        usage ;;
-		'--import')
-			import ;;
-                *) 
-                        usage ;;
-        esac
+    usage
+    exit 1
 fi
 
 exit $?
