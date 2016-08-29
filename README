@@ -3,9 +3,6 @@
 # Author: Telecoms Sans Frontieres
 # Mail: it@tsfi.org
 # GIT Repository: https://github.com/TelecomsSansFrontieres
-#
-# Contributors:
-# - Florent Bervas
 #------------------------
 
 Usage: certbot-tomcat -f [FILE] [OPTION]...
