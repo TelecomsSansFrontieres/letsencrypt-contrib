@@ -21,16 +21,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-#
-#
-#------------------------
-# Author: Telecoms Sans Frontieres
-# Mail: it@tsfi.org
-# GIT Repository: https://github.com/TelecomsSansFrontieres
-#
-# Contributors:
-# - Florent Bervas
-#------------------------
 
 # Global configuration variable declared in configuration file
 EMAIL=""
