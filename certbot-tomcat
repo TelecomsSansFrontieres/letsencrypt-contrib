@@ -40,14 +40,17 @@ LETSENCRYPTDIR=""
 KEYTOOLDIR=""
 KEYSTORE=""
 PASSFILE=""
-DOMAIN=""
 CERTDIR=""
+DOMAIN=""
+DOMAINS=""
 EXPIRE_DAYS=""
+SYSCMD=""
+ATCMD=""
 
 
 # Usage function
 function usage {
-	cat << EOF
+    cat << EOF
 Usage: $(basename ${0}) -f [FILE] [OPTION]...
 This script is designed to handle automated management of Letsencrypt
 certificates on production servers.
@@ -70,20 +73,28 @@ function init() {
     e=false    
 
     # Check domain
-    [ -z "${DOMAIN}" ] && echo "DOMAIN variable is not defined" && e=true
-	[ -z "${CERTDIR}" ] && CERTDIR="/etc/letsencrypt/live/${DOMAIN}/"
-	[ -z "${EXPIRE_DAYS}" ] && EXPIRE_DAYS="30"
-    # Test variables, files and directories
-    [ -z "$EMAIL" ] && echo "EMAIL variable is not defined" && e=true
+    [ -z "${DOMAINS}" ] && echo "DOMAINS variable is not defined" && e=true || DOMAIN=${DOMAINS%%,*}
+    # ${DOMAIN} is extracted if DOMAINS exists
+    [ -z "${CERTDIR}" ] && [ -z "${DOMAIN}" ] && CERTDIR="/etc/letsencrypt/live/${DOMAIN}/"
+    [ -z "${EXPIRE_DAYS}" ] && EXPIRE_DAYS="30"
+    # Check variables
+    [ -z "${EMAIL}" ] && echo "EMAIL variable is not defined" && e=true
+    [ -z "${DELAY}" ] && echo "DELAY variable is not defined" && e=true
+    [ -z "${SYSCMD}" ] && echo "SYSCMD variable is not defined" && e=true
+    # Check files and directories
     [ ! -d "$HOMEDIR" ] && echo "HOMEDIR doesn't exist" && e=true
     [ ! -d "$LETSENCRYPTDIR" ] && echo "LETSENCRYPTDIR doesn't exist" && e=true
     [ ! -d "$KEYTOOLDIR" ] && echo "KEYTOOLDIR doesn't exist" && e=true
     [ ! -f "$KEYSTORE" ] && echo "KEYSTORE doesn't exist" && e=true
     [ ! -f "$PASSFILE" ] && echo "PASSFILE doesn't exist" && e=true
+    [ ! -f "$ATCMD" ] && echo "ATCMD ${ATCMD} doesn't exist" && e=true
     # not mandatory: [ -z "$LISTENPORT" ] && echo "LISTENPORT variable is not defined" && exit 1
 
     # Exit if flag is true
     [ $e == true ] && exit 1
+
+    # Format domains list: -d ${DOMAIN1} -d ${DOMAIN2} -d ...
+    DOMAINS=$(eval "echo \"-d \"{${DOMAINS}}")
 
     # Import password
     mapfile < ${PASSFILE} PASSWD
@@ -96,11 +107,13 @@ function renew() {
     # Save initial cert hash
     certhash=$(md5sum "${CERTDIR}/cert.pem" | cut -d' ' -f1)
 
-	${LETSENCRYPTDIR}/certbot-auto \
-		renew --post-hook "${0} -f ${CONFIG} -i"
+    ${LETSENCRYPTDIR}/certbot-auto \
+        renew --post-hook "${0} -f ${CONFIG} -i"
 
     # Check if md5sum differ from initial cert hash
     if [ ${certhash} != $(md5sum "${CERTDIR}/cert.pem" | cut -d' ' -f1) ]; then
+    # Planned service restart
+        /usr/local/bin/at-notify -d ${DELAY} -m ${EMAIL} -e "${SYSCMD}"
         return 2
     fi
 
@@ -108,66 +121,66 @@ function renew() {
 }
 
 function create() {
-	${LETSENCRYPTDIR}/certbot-auto \
-		certonly \
-		--agree-tos \
-		--no-self-upgrade \
-		--non-interactive \
-		--renew-by-default \
+    ${LETSENCRYPTDIR}/certbot-auto \
+        certonly \
+        --agree-tos \
+        --no-self-upgrade \
+        --non-interactive \
+        --renew-by-default \
         --renew_before_expiry ${EXPIRE_DAYS} \
-		--standalone \
-		--email ${EMAIL} \
-		--http-01-port ${LISTENPORT} \
-		-d ${DOMAIN}
+        --standalone \
+        --email ${EMAIL} \
+        --http-01-port ${LISTENPORT} \
+        ${DOMAINS}
 }
 
 function clean() {
-	# Delete previously imported certificates
-	${KEYTOOLDIR}/keytool \
-		-delete \
-		-alias root \
-		-storepass ${PASSWD} \
-		-keystore ${KEYSTORE}
-	${KEYTOOLDIR}/keytool \
-		-delete \
-		-alias tomcat \
-		-storepass ${PASSWD} \
-		-keystore ${KEYSTORE}
+    # Delete previously imported certificates
+    ${KEYTOOLDIR}/keytool \
+        -delete \
+        -alias root \
+        -storepass ${PASSWD} \
+        -keystore ${KEYSTORE}
+    ${KEYTOOLDIR}/keytool \
+        -delete \
+        -alias tomcat \
+        -storepass ${PASSWD} \
+        -keystore ${KEYSTORE}
 }
 
 function import() {
     # Clean previous stored certificates
     clean
 
-	# Generate signed certificate
-	openssl pkcs12 \
-		-export \
-		-in ${CERTDIR}/fullchain.pem \
-		-inkey ${CERTDIR}/privkey.pem \
-		-out ${CERTDIR}/${DOMAIN}.p12 \
-		-name tomcat \
-		-CAfile ${CERTDIR}/chain.pem \
-		-caname root \
-		-password pass:${PASSWD}
+    # Generate signed certificate
+    openssl pkcs12 \
+        -export \
+        -in ${CERTDIR}/fullchain.pem \
+        -inkey ${CERTDIR}/privkey.pem \
+        -out ${CERTDIR}/${DOMAIN}.p12 \
+        -name tomcat \
+        -CAfile ${CERTDIR}/chain.pem \
+        -caname root \
+        -password pass:${PASSWD}
 
-	# Import keystore into Tomcat
-	${KEYTOOLDIR}/keytool \
-		-importkeystore \
-		-srcstorepass ${PASSWD} \
-		-deststorepass ${PASSWD} \
-		-destkeypass ${PASSWD} \
-		-srckeystore ${CERTDIR}/${DOMAIN}.p12 \
-		-srcstoretype PKCS12 \
-		-alias tomcat \
-		-keystore ${KEYSTORE}
-	${KEYTOOLDIR}/keytool \
-		-import \
-		-trustcacerts \
-		-alias root \
-		-deststorepass ${PASSWD} \
-		-file ${CERTDIR}/chain.pem \
-		-noprompt \
-		-keystore ${KEYSTORE}
+    # Import keystore into Tomcat
+    ${KEYTOOLDIR}/keytool \
+        -importkeystore \
+        -srcstorepass ${PASSWD} \
+        -deststorepass ${PASSWD} \
+        -destkeypass ${PASSWD} \
+        -srckeystore ${CERTDIR}/${DOMAIN}.p12 \
+        -srcstoretype PKCS12 \
+        -alias tomcat \
+        -keystore ${KEYSTORE}
+    ${KEYTOOLDIR}/keytool \
+        -import \
+        -trustcacerts \
+        -alias root \
+        -deststorepass ${PASSWD} \
+        -file ${CERTDIR}/chain.pem \
+        -noprompt \
+        -keystore ${KEYSTORE}
 
     return $?
 }
