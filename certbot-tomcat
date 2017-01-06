@@ -79,15 +79,14 @@ function init() {
     [ -z "${EXPIRE_DAYS}" ] && EXPIRE_DAYS="30"
     # Check variables
     [ -z "${EMAIL}" ] && echo "EMAIL variable is not defined" && e=true
-    [ -z "${DELAY}" ] && echo "DELAY variable is not defined" && e=true
     [ -z "${SYSCMD}" ] && echo "SYSCMD variable is not defined" && e=true
     # Check files and directories
     [ ! -d "$HOMEDIR" ] && echo "HOMEDIR doesn't exist" && e=true
     [ ! -d "$LETSENCRYPTDIR" ] && echo "LETSENCRYPTDIR doesn't exist" && e=true
     [ ! -d "$KEYTOOLDIR" ] && echo "KEYTOOLDIR doesn't exist" && e=true
+    [ ! -f "$CERTDIR/cert.pem" ] && echo "$CERTDIR/cert.pem doesn't exist" && e=true
     [ ! -f "$KEYSTORE" ] && echo "KEYSTORE doesn't exist" && e=true
     [ ! -f "$PASSFILE" ] && echo "PASSFILE doesn't exist" && e=true
-    [ ! -f "$ATCMD" ] && echo "ATCMD ${ATCMD} doesn't exist" && e=true
     # not mandatory: [ -z "$LISTENPORT" ] && echo "LISTENPORT variable is not defined" && exit 1
 
     # Exit if flag is true
@@ -112,8 +111,6 @@ function renew() {
 
     # Check if md5sum differ from initial cert hash
     if [ ${certhash} != $(md5sum "${CERTDIR}/cert.pem" | cut -d' ' -f1) ]; then
-    # Planned service restart
-        /usr/local/bin/at-notify -d ${DELAY} -m ${EMAIL} -e "${SYSCMD}"
         return 2
     fi
 
