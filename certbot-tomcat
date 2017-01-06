@@ -44,9 +44,6 @@ CERTDIR=""
 DOMAIN=""
 DOMAINS=""
 EXPIRE_DAYS=""
-SYSCMD=""
-ATCMD=""
-
 
 # Usage function
 function usage {
@@ -79,7 +76,6 @@ function init() {
     [ -z "${EXPIRE_DAYS}" ] && EXPIRE_DAYS="30"
     # Check variables
     [ -z "${EMAIL}" ] && echo "EMAIL variable is not defined" && e=true
-    [ -z "${SYSCMD}" ] && echo "SYSCMD variable is not defined" && e=true
     # Check files and directories
     [ ! -d "$HOMEDIR" ] && echo "HOMEDIR doesn't exist" && e=true
     [ ! -d "$LETSENCRYPTDIR" ] && echo "LETSENCRYPTDIR doesn't exist" && e=true
