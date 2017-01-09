@@ -1,7 +1,9 @@
 # letsencrypt-contrib
 
 Author: Telecoms Sans Frontieres
+
 Mail: it@tsfi.org
+
 GIT Repository: https://github.com/TelecomsSansFrontieres
 
 # Usage
@@ -40,7 +42,7 @@ CONFIGURATION FILE
                     must be accessible to the application's user.
 
     PASSFILE        Full patch of the file that contains the encrypting passphrase.
-``
+```
 
 # Crontab
 
